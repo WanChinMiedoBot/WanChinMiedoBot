@@ -69,6 +69,9 @@ class Update(JsonDeserializable):
         self.chosen_inline_result = de_json(ChosenInlineResult, chosen_inline_result)
         self.callback_query = de_json(CallbackQuery, callback_query)
 
+    def __str__(self):
+        return "Update[update_id={0}]".format(self.update_id)
+
 
 class User(JsonDeserializable):
 

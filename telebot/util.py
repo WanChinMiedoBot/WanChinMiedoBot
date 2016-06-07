@@ -11,7 +11,7 @@ logger = logging.getLogger('TeleBot')
 
 def __init_logger():
     formatter = logging.Formatter(
-        '%(asctime)s (%(filename)s:%(lineno)d %(threadName)s) %(levelname)s - %(name)s: "%(message)s"'
+        '%(asctime)s "%(filename)s:%(lineno)d" %(levelname)s: "%(message)s "'
     )
 
     console_output_handler = logging.StreamHandler(sys.stderr)
@@ -129,6 +129,13 @@ def xmerge(*dicts):
         if v is None:
             del copy[k]
     return copy
+
+
+def find_first(it, predicate):
+    try:
+        return next(x for x in it if predicate(x))
+    except StopIteration:
+        return None
 
 
 def required(*required_kwargs):

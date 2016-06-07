@@ -42,11 +42,7 @@ class TelegramApiInterface:
         self.file_url = file_url
 
     @staticmethod
-    def convert_markup(markup):
-        return types.to_json(markup)
-
-    @staticmethod
-    def convert_inline_results(results):
+    def __convert_inline_results(results):
         """
         Converts a list of InlineQueryResult objects to a json string.
         :param results: list of InlineQueryResult objects
@@ -58,15 +54,15 @@ class TelegramApiInterface:
     def make_request(self, method_name, params=None, files=None, method='get', response_type='json'):
         request_url = self.api_url.format(self.token, method_name)
         try:
-            response = self.request_executor(request_url,
-                                             method=method, params=params, files=files, response_type=response_type)
+            kwargs = {'method': method, 'params': params, 'files': files, 'response_type': response_type}
+            response = self.request_executor(request_url, **kwargs)
             return response
         except Exception as e:
             raise ApiException(repr(e), method_name)
 
     def make_json_request(self, method_name, params=None, files=None, method='post', return_type=None):
         if params is not None and 'reply_markup' in params:
-            params['reply_markup'] = self.convert_markup(params['reply_markup'])
+            params['reply_markup'] = types.to_json(params['reply_markup'])
 
         response = self.make_request(method_name, params, files, method, response_type='json')
         if not response['ok']:
@@ -406,7 +402,7 @@ class TelegramApiInterface:
         """
         params = util.xmerge({
             'inline_query_id': inline_query_id,
-            'results': self.convert_inline_results(results)
+            'results': self.__convert_inline_results(results)
         }, kwargs)
         return self.make_json_request('answerInlineQuery', params=params)
 

@@ -1,30 +1,22 @@
-
-import threading
-import six
-import sys
-import time
-import types
-
+# -*- coding: utf-8 -*-
 import telebot.listeners as listeners
 from telebot.util import logger
-from telebot.apihelper import TelegramApiInterface, DefaultRequestExecutor, ApiException
+from telebot.apihelper import TelegramApiInterface, DefaultRequestExecutor
 
 
-def stopping_exception_handler(bot, exception):
-    logger.error(exception)
-    logger.info("Exception occurred. Stopping.")
-    bot.stop_polling()
+def stopping_exception_handler(_):
+    logger.exception("Exception occurred. Stopping.")
+    return False
 
 
-def continuing_exception_handler(_, exception):
-    logger.error(exception)
-    logger.info("Exception occurred, waiting 5 seconds.")
-    time.sleep(5)
+def continuing_exception_handler(_):
+    logger.exception("Exception occurred.")
+    return True
 
 
 class TeleBot(TelegramApiInterface):
 
-    def __init__(self, token, request_executor=None):
+    def __init__(self, token, exception_handler=stopping_exception_handler, request_executor=None):
         """
         :param token: bot API token
         :return: Telebot object.
@@ -32,10 +24,11 @@ class TeleBot(TelegramApiInterface):
         request_executor = request_executor if request_executor is not None else DefaultRequestExecutor()
         TelegramApiInterface.__init__(self, token, request_executor)
 
+        self.exception_handler = exception_handler
         self.token = token
-        self.update_listeners = []
+        self.event_bus = listeners.EventBus()
 
-        self.__stop_polling = threading.Event()
+        self.__stop_polling = False
         self.last_update_id = 0
 
     def __yield_updates(self, timeout=20):
@@ -43,7 +36,7 @@ class TeleBot(TelegramApiInterface):
         while updates:
             for u in updates:
                 yield u
-            self.last_update_id = max(updates, key=lambda u: u.update_id).update_id
+            self.last_update_id = max(updates, key=lambda update: update.update_id).update_id
             updates = self.get_updates(offset=(self.last_update_id + 1), timeout=timeout)
 
     def skip_updates(self, timeout=1):
@@ -62,48 +55,55 @@ class TeleBot(TelegramApiInterface):
         """
         self.process_new_updates(self.__yield_updates(timeout=timeout))
 
+    def __process_update(self, update):
+        logger.debug("Processing update {0}".format(update))
+
+        self.event_bus.dispatch('on_update', update)
+
+        if update.message is not None:
+            self.event_bus.dispatch('on_message', update.message)
+        elif update.edited_message is not None:
+            self.event_bus.dispatch('on_edited_message', update.edited_message)
+        elif update.inline_query is not None:
+            self.event_bus.dispatch('on_inline_query', update.inline_query)
+        elif update.chosen_inline_result is not None:
+            self.event_bus.dispatch('on_chosen_inline_result', update.chosen_inline_result)
+        elif update.callback_query is not None:
+            self.event_bus.dispatch('on_callback_query', update.callback_query)
+
     def process_new_updates(self, updates):
         for update in updates:
-            logger.debug('Received new updates: {0}'.format(update))
-            for listener in self.update_listeners:
-                listener(update)
+            try:
+                self.__process_update(update)
+            except Exception as e:
+                # If the exception handler returns False, drop all updates
+                if not self.exception_handler(e):
+                    self.stop_polling()
+                    break
 
-    def polling(self, skip_pending=False, timeout=20, exception_handler=stopping_exception_handler):
+    def polling(self, skip_pending=False, timeout=20):
         """
-        This function creates a new Thread that calls an internal __retrieve_updates function.
-        This allows the bot to retrieve Updates automagically and notify listeners and message handlers accordingly.
+        This function retrieves Updates and dispatches events.
 
         Warning: Do not call this function more than once!
 
-        Always get updates.
-        :param exception_handler:
-        :param skip_pending: Retrieve and discard pending updates
+        :param skip_pending: Retrieve and discard pending updates (e.g. do not dispatch events)
         :param timeout: Timeout in seconds for long polling.
         :return:
         """
         logger.info('Started polling.')
-        self.__stop_polling.clear()
+        self.__stop_polling = False
 
         if skip_pending:
-            logger.info('Skipped {0} pending messages'.format(len(self.skip_updates())))
+            logger.info('Skipped {0} pending updates'.format(len(self.skip_updates())))
 
-        while not self.__stop_polling.wait(0):
-            try:
-                self.retrieve_updates(timeout)
-            except ApiException as e:
-                exception_handler(self, e)
-            except KeyboardInterrupt:
-                logger.info("KeyboardInterrupt")
-                self.__stop_polling.set()
-                six.reraise(*sys.exc_info())
+        while not self.__stop_polling:
+            self.retrieve_updates(timeout)
 
         logger.info('Stopped polling.')
 
     def stop_polling(self):
-        self.__stop_polling.set()
-
-    def add_update_listener(self, listener):
-        self.update_listeners.append(listener)
+        self.__stop_polling = True
 
     def remove_webhook(self):
         return self.set_webhook()  # No params resets webhook
@@ -113,9 +113,6 @@ class TeleBot(TelegramApiInterface):
         Convenience function for `send_message(message.chat.id, text, reply_to_message_id=message.message_id, **kwargs)`
         """
         return self.send_message(message.chat.id, text, reply_to_message_id=message.message_id, **kwargs)
-
-    def register_next_step_handler(self, message, handler):
-        self.add_update_listener(listeners.NextStepHandler(handler, message))
 
     def message_handler(self, **kwargs):
         """
@@ -153,7 +150,7 @@ class TeleBot(TelegramApiInterface):
         return decorator
 
     def add_message_handler(self, handler, **kwargs):
-        self.add_update_listener(listeners.MessageHandler(handler, **kwargs))
+        self.event_bus.append_event_listener('on_message', listeners.MessageHandler(self.event_bus, handler, **kwargs))
 
     def inline_handler(self, func):
         def decorator(handler):
@@ -162,7 +159,7 @@ class TeleBot(TelegramApiInterface):
         return decorator
 
     def add_inline_handler(self, handler, func):
-        self.add_update_listener(listeners.InlineHandler(handler, func))
+        self.event_bus.append_event_listener('on_inline_query', listeners.InlineHandler(handler, func))
 
     def chosen_inline_handler(self, func):
         def decorator(handler):
@@ -171,7 +168,7 @@ class TeleBot(TelegramApiInterface):
         return decorator
 
     def add_chosen_inline_handler(self, handler, func):
-        self.add_update_listener(listeners.ChosenInlineResultHandler(handler, func))
+        self.event_bus.append_event_listener('on_chosen_inline_result', listeners.ChosenInlineResultHandler(handler, func))
 
     def callback_query_handler(self, func):
         def decorator(handler):
@@ -180,4 +177,6 @@ class TeleBot(TelegramApiInterface):
         return decorator
 
     def add_callback_query_handler(self, handler, func):
-        self.add_update_listener(listeners.CallbackQueryHandler(handler, func))
+        self.event_bus.append_event_listener('on_callback_query', listeners.CallbackQueryHandler(handler, func))
+
+
