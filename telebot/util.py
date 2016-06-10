@@ -85,27 +85,38 @@ def split_string(text, chars_per_string):
 
 
 def obj_to_dict(obj):
-    d = obj.__dict__.copy()
-    if hasattr(obj, 'json_exclude'):
-        for key in obj.json_exclude:
-            if key in d:
-                del d[key]
+    return xmerge(__todict(obj))
 
-    for key, value in six.iteritems(d):
-        if hasattr(value, '__dict__'):
-            d[key] = obj_to_dict(value)
-    return xmerge(d)
+
+# Credits: http://stackoverflow.com/questions/1036409
+def __todict(obj, classkey=None):
+    if isinstance(obj, dict):
+        data = {}
+        for (k, v) in obj.items():
+            data[k] = __todict(v, classkey)
+        return data
+
+    elif hasattr(obj, '_ast'):
+        return __todict(obj._ast())
+
+    elif hasattr(obj, '__iter__'):
+        return [__todict(v, classkey) for v in obj]
+
+    elif hasattr(obj, '__dict__'):
+        data = dict([(key, __todict(value, classkey))
+                     for key, value in obj.__dict__.iteritems()
+                     if not callable(value) and not key.startswith('_')])
+
+        if classkey is not None and hasattr(obj, "__class__"):
+            data[classkey] = obj.__class__.__name__
+        return data
+
+    else:
+        return obj
 
 
 def obj_to_json(obj):
     return json.dumps(obj, default=lambda o: o.__dict__)
-
-
-def json_exclude(*fields):
-    def decorator(cls):
-        cls.json_exclude = [f for f in fields]
-        return cls
-    return decorator
 
 
 def merge_dicts(*dicts):

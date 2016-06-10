@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 from telebot import telegram_types as types
+from telebot import type_helpers as helpers
 from telebot import util
 from telebot import listeners
 from telebot import apihelper

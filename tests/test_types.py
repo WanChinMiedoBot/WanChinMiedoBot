@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
 from telebot import types
+from telebot import helpers
+import json
 
 
 def test_json_user():
@@ -121,7 +123,7 @@ def test_json_chat():
     assert chat.title == 'Test Title'
 
 def test_InlineQueryResultCachedPhoto():
-    iq = types.InlineQueryResultFactory.create_cached_result('photo', 'aaa', 'Fileid')
+    iq = helpers.InlineQueryResultHelper.create_cached_result('photo', 'aaa', 'Fileid')
     json_str = types.to_json(iq)
     assert 'aa' in json_str
     assert 'Fileid' in json_str
@@ -129,7 +131,7 @@ def test_InlineQueryResultCachedPhoto():
 
 
 def test_InlineQueryResultCachedPhoto_with_title():
-    iq = types.InlineQueryResultFactory.create_cached_result('photo', 'aaa', 'Fileid', title='Title')
+    iq = helpers.InlineQueryResultHelper.create_cached_result('photo', 'aaa', 'Fileid', title='Title')
     json_str = types.to_json(iq)
     assert 'aa' in json_str
     assert 'Fileid' in json_str
@@ -137,13 +139,13 @@ def test_InlineQueryResultCachedPhoto_with_title():
     assert 'caption' not in json_str
 
 def test_InlineQueryResultCachedPhoto_with_markup():
-    markup = types.InlineKeyboardMarkup()
-    markup.add(types.InlineKeyboardButton("Google", url="http://www.google.com"))
-    markup.add(types.InlineKeyboardButton("Yahoo", url="http://www.yahoo.com"))
-    iq = types.InlineQueryResultFactory.create_cached_result(
-        'photo', 'aaa', 'Fileid', title='Title', reply_markup=markup
+    markup = helpers.InlineKeyboardHelper()
+    markup.add("Google", url="http://www.google.com")
+    markup.add("Yahoo", url="http://www.yahoo.com")
+    iq = helpers.InlineQueryResultHelper.create_cached_result(
+        'photo', 'aaa', 'Fileid', title='Title', reply_markup=markup.build()
     )
-    json_str = types.to_json(iq)
+    json_str = json.dumps(iq)
     assert 'aa' in json_str
     assert 'Fileid' in json_str
     assert 'Title' in json_str

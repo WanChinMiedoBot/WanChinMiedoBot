@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 
 import json
-import six
 
 import telebot.util as util
 
@@ -43,8 +42,7 @@ def to_json(obj):
 
 class Dictionaryable:
     """
-    Subclasses of this class are guaranteed to be able to be converted to dictionary.
-    All subclasses of this class must override to_dict.
+    Subclasses are guaranteed to be able to be converted to a dictionary using to_dict()
     """
     pass
 
@@ -149,9 +147,9 @@ class Message(JsonDeserializable):
         self.migrate_from_chat_id = migrate_from_chat_id
         self.pinned_message = de_json(Message, pinned_message)
 
-        self.content_type = self.determine_content_type()
+        self.content_type = self.__determine_content_type()
 
-    def determine_content_type(self):
+    def __determine_content_type(self):
         for content_type in self.CONTENT_TYPES:
             if getattr(self, content_type) is not None:
                 return content_type
@@ -294,53 +292,11 @@ class ReplyKeyboardHide(Dictionaryable):
 
 
 class ReplyKeyboardMarkup(Dictionaryable):
-    def __init__(self, resize_keyboard=None, one_time_keyboard=None, selective=None, row_width=3):
+    def __init__(self, keyboard, resize_keyboard=None, one_time_keyboard=None, selective=None):
+        self.keyboard = keyboard
         self.resize_keyboard = resize_keyboard
         self.one_time_keyboard = one_time_keyboard
         self.selective = selective
-        self.row_width = row_width
-
-        self.keyboard = []
-
-    def add(self, *args):
-        """
-        This function adds strings to the keyboard, while not exceeding row_width.
-        E.g. ReplyKeyboardMarkup#add("A", "B", "C") yields the json result {keyboard: [["A"], ["B"], ["C"]]}
-        when row_width is set to 1.
-        When row_width is set to 2, the following is the result of this function: {keyboard: [["A", "B"], ["C"]]}
-        See https://core.telegram.org/bots/api#replykeyboardmarkup
-        :param args: KeyboardButton to append to the keyboard
-        """
-        i = 1
-        row = []
-        for button in args:
-            if util.is_string(button):
-                row.append({'text': button})
-            else:
-                row.append(to_dict(button))
-            if i % self.row_width == 0:
-                self.keyboard.append(row)
-                row = []
-            i += 1
-        if len(row) > 0:
-            self.keyboard.append(row)
-
-    def row(self, *args):
-        """
-        Adds a list of KeyboardButton to the keyboard. This function does not consider row_width.
-        ReplyKeyboardMarkup#row("A")#row("B", "C")#to_json() outputs '{keyboard: [["A"], ["B", "C"]]}'
-        See https://core.telegram.org/bots/api#replykeyboardmarkup
-        :param args: strings
-        :return: self, to allow function chaining.
-        """
-        btn_array = []
-        for button in args:
-            if util.is_string(button):
-                btn_array.append({'text': button})
-            else:
-                btn_array.append(button.to_dic())
-        self.keyboard.append(btn_array)
-        return self
 
 
 class KeyboardButton(Dictionaryable):
@@ -350,46 +306,9 @@ class KeyboardButton(Dictionaryable):
         self.request_location = request_location
 
 
-@util.json_exclude('row_width')
 class InlineKeyboardMarkup(Dictionaryable):
-    def __init__(self, row_width=3):
-        self.row_width = row_width
-
-        self.keyboard = []
-
-    def add(self, *args):
-        """
-        This function adds strings to the keyboard, while not exceeding row_width.
-        E.g. ReplyKeyboardMarkup#add("A", "B", "C") yields the json result {keyboard: [["A"], ["B"], ["C"]]}
-        when row_width is set to 1.
-        When row_width is set to 2, the following is the result of this function: {keyboard: [["A", "B"], ["C"]]}
-        See https://core.telegram.org/bots/api#replykeyboardmarkup
-        :param args: KeyboardButton to append to the keyboard
-        """
-        i = 1
-        row = []
-        for button in args:
-            row.append(to_dict(button))
-            if i % self.row_width == 0:
-                self.keyboard.append(row)
-                row = []
-            i += 1
-        if len(row) > 0:
-            self.keyboard.append(row)
-
-    def row(self, *args):
-        """
-        Adds a list of KeyboardButton to the keyboard. This function does not consider row_width.
-        ReplyKeyboardMarkup#row("A")#row("B", "C")#to_json() outputs '{keyboard: [["A"], ["B", "C"]]}'
-        See https://core.telegram.org/bots/api#inlinekeyboardmarkup
-        :param args: strings
-        :return: self, to allow function chaining.
-        """
-        btn_array = []
-        for button in args:
-            btn_array.append(to_dict(button))
-        self.keyboard.append(btn_array)
-        return self
+    def __init__(self, inline_keyboard):
+        self.inline_keyboard = inline_keyboard
 
 
 class InlineKeyboardButton(Dictionaryable):
@@ -479,54 +398,3 @@ class InputContactMessageContent(Dictionaryable):
         self.first_name = first_name
         self.last_name = last_name
 
-
-class InlineQueryResultFactory:
-    TYPES = [
-        'article', 'audio', 'contact', 'document', 'gif', 'location',
-        'mpeg4_gif', 'photo', 'venue', 'video', 'voice'
-    ]
-    CACHED_TYPES = ['photo', 'gif', 'mpeg4_gif', 'sticker', 'document', 'video', 'voice', 'audio']
-    __CACHED_FILE_ID_KEYS = {
-        'photo': 'photo_file_id',
-        'gif': 'gif_file_id',
-        'mpeg4_gif': 'mpeg4_file_id',
-        'sticker': 'sticker_file_id',
-        'document': 'document_file_id',
-        'video': 'video_file_id',
-        'voice': 'voice_file_id',
-        'audio': 'audio_file_id'
-    }
-
-    def __init__(self):
-        raise NotImplementedError('Instantiation not allowed')
-
-    @staticmethod
-    def create_result(type, id, **kwargs):
-        if type not in InlineQueryResultFactory.TYPES:
-            raise ValueError('Unknown type: {0}. Known types: {1}'.format(type, InlineQueryResultFactory.TYPES))
-
-        json_dict = kwargs
-        json_dict['type'] = type
-        json_dict['id'] = id
-
-        for k, v in six.iteritems(json_dict):
-            json_dict[k] = to_dict(v)
-
-        return json_dict
-
-    @staticmethod
-    def create_cached_result(type, id, file_id, **kwargs):
-        if type not in InlineQueryResultFactory.CACHED_TYPES:
-            raise ValueError(
-                'Unknown cached type: {0}. Known types: {1}'.format(type, InlineQueryResultFactory.CACHED_TYPES)
-            )
-
-        json_dict = kwargs
-        json_dict['type'] = type
-        json_dict['id'] = id
-        json_dict[InlineQueryResultFactory.__CACHED_FILE_ID_KEYS[type]] = file_id
-
-        for k, v in six.iteritems(json_dict):
-            json_dict[k] = to_dict(v)
-
-        return json_dict

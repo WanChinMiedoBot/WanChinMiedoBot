@@ -6,19 +6,19 @@ import types
 from telebot import util
 
 
-def same_chat(chat):
-    return lambda message: message.chat.id == chat.id
+def _same_chat(message):
+    return lambda m: m.chat.id == message.chat.id
 
 
-def has_content_types(content_types):
+def _has_content_types(content_types):
     return lambda m: m.content_type in content_types
 
 
-def has_commands(commands):
+def _has_commands(commands):
     return lambda m: m.content_type == 'text' and util.extract_command(m.text) in commands
 
 
-def has_regex(regex):
+def _has_regex(regex):
     return lambda m: m.content_type == 'text' and re.search(regex, m.text)
 
 
@@ -47,24 +47,45 @@ class EventBus:
         return False
 
     def dispatch(self, event, *args, **kwargs):
+        """
+        Dispatches an event to registered listeners
+        All listeners that registered to the event are called until one returns a truthy value.
+
+        Usage:
+            >>> bus.dispatch('some_event', some_argument, extra=keyword_argument)
+
+        :param event: An event. May be an int, string or any unique identifier for this event. This parameter
+            should be the same as the listeners used to register for this event using append_event_listener().
+        :param args: Any arguments passed to the listeners
+        :param kwargs: Any keyword arguments passed to the listeners
+        :return: False if no listeners accepted this event and True otherwise
+        """
         if event not in self.event_listeners:
             util.logger.debug("Event {0} dispatched but no listeners".format(event))
-            return
+            return False
 
         for listener in self.event_listeners[event]:
             if listener(*args, **kwargs):
-                break
+                return True
+
+        util.logger.debug("No listener accepted the event")
+        return False
 
 
 class GeneratorListener:
+    """
+    This listener sends messages to a generator until that generator raises StopIteration and then
+    it removes itself from the event listeners.
 
-    def __init__(self, event_bus, chat_id, generator):
+    This listener only accepts messages with for which `func` returns True
+    """
+    def __init__(self, event_bus, func, generator):
         self.event_bus = event_bus
-        self.chat_id = chat_id
+        self.func = func
         self.generator = generator
 
     def __call__(self, message):
-        if message.chat.id != self.chat_id:
+        if not self.func(message):
             return False
 
         try:
@@ -82,13 +103,13 @@ class MessageHandler:
         self.handler = handler
         self.tests = []
         if content_types is not None:
-            self.tests.append(has_content_types(content_types))
+            self.tests.append(_has_content_types(content_types))
 
         if commands is not None:
-            self.tests.append(has_commands(commands))
+            self.tests.append(_has_commands(commands))
 
         if regexp is not None:
-            self.tests.append(has_regex(regexp))
+            self.tests.append(_has_regex(regexp))
 
         if func is not None:
             self.tests.append(func)
@@ -100,7 +121,8 @@ class MessageHandler:
         returned = self.handler(message)
         if isinstance(returned, types.GeneratorType):
             returned.next()
-            generator_listener = GeneratorListener(self.event_bus, message.chat.id, returned)
+            generator_listener = GeneratorListener(self.event_bus, _same_chat(message), returned)
+            # Generators are prioritized over ordinary listeners
             self.event_bus.prepend_event_listener('on_message', generator_listener)
         return True
 
